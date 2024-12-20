@@ -137,10 +137,11 @@
         'rightAnkle',
       ];
 
-      let arms = [];
+      let arms = {};
       function findArms(landmarks_data, boxes_data, scores_data, widthRatio, heightRatio) {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        const lastArms = arms;
         arms = [];
         for (let i = 0; i < scores_data.length; ++i) {
           const keypoints = landmarks_data.slice([i, 0, 0], [1, -1, -1]).reshape([17, 3]).arraySync();
@@ -154,7 +155,8 @@
           ctx.strokeStyle = 'green';
           if (p.leftElbow.y > p.leftWrist.y) {
             ctx.strokeStyle = 'red';
-            arms.push({ elbow: p.leftElbow, wrist: p.leftWrist, person: i, side: 'left' });
+            const key = `p${i}-left`;
+            arms[key] = { elbow: p.leftElbow, wrist: p.leftWrist, side: 'left' };
           }
           ctx.beginPath();
           ctx.moveTo(p.leftElbow.x, p.leftElbow.y);
@@ -164,7 +166,7 @@
           ctx.strokeStyle = 'blue';
           if (p.rightElbow.y > p.rightWrist.y) {
             ctx.strokeStyle = 'yellow';
-            arms.push({ elbow: p.rightElbow, wrist: p.rightWrist, person: i, side: 'right' });
+            arms[`p${i}-right`] = { elbow: p.rightElbow, wrist: p.rightWrist, side: 'right' };
           }
           ctx.beginPath();
           ctx.moveTo(p.rightElbow.x, p.rightElbow.y);
@@ -172,8 +174,12 @@
           ctx.stroke();
           ctx.closePath();
         }
-        for (const arm of arms) {
+        for (const key in arms) {
+          const arm = arms[key];
           arm.angle = getLEDAngle(arm.elbow, arm.wrist);
+          if (lastArms[key]) {
+            arm.angle = lastArms[key].angle * 0.9 + arm.angle * 0.1;
+          }
         }
       }
       function getLEDAngle(p1, p2) {
@@ -199,12 +205,12 @@
           let r = 0;
           let g = 0;
           let b = 1;
-          for (const arm of arms) {
+          for (const arm of Object.values(arms)) {
             const d = i - arm.angle;
-            if (arm.side === 'left' && arm.person === 0) {
+            if (arm.side === 'left') {
               r += 100 * Math.exp(-0.02 * d * d);
             }
-            if (arm.side === 'right' && arm.person === 0) {
+            if (arm.side === 'right') {
               g += 100 * Math.exp(-0.02 * d * d);
             }
           }
@@ -217,4 +223,3 @@
     </script>
   </body>
 </html>
-
