@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.16.0/tf.js"
+      integrity="sha512-h2uoAnR61cun1IpMUeG45l4ZucxXsW265G2ruTZA28qN3SPV2VlE6+34qZYii2JjdxY5vemxH0AHgsw2zoGcNQ=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <style>
+      .content {
+        position: relative;
+        transform: scaleX(-1) scale(0.5);
+      }
+      video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1280px;
+        height: 720px;
+        object-fit: cover;
+        z-index: -1;
+      }
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 1280px;
+        height: 720px;
+        z-index: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="content">
+      <video id="video" autoplay="true" playsinline="true" muted="true"></video>
+      <canvas id="canvas"></canvas>
+    </div>
+    <script>
+      const LEDS = 600;
+      const ws = new WebSocket(`ws://192.168.0.172:8000/ws`);
+      const video = document.querySelector('#video');
+      const canvas = document.querySelector('canvas');
+      let model;
+      async function run() {
+        await tf.ready();
+        const yolov8 = await tf.loadGraphModel('https://yolov8pose.glitch.me/yolov8_pose_tfjs/model/model.json');
+        const dummyInput = tf.ones(yolov8.inputs[0].shape);
+        const warmupResults = yolov8.execute(dummyInput);
+        model = {
+          network: yolov8,
+          inputShape: yolov8.inputs[0].shape,
+        };
+        tf.dispose([warmupResults, dummyInput]);
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: 'user' },
+        });
+        video.srcObject = stream;
+        video.play();
+        setInterval(detect, 40);
+      }
+      run();
+
+      function preProcessImage(source, modelWidth, modelHeight) {
+        let widthRatio, heightRatio;
+        const input = tf.tidy(() => {
+          const img = tf.browser.fromPixels(source);
+          const [h, w] = img.shape.slice(0, 2);
+          const maxSize = Math.max(w, h);
+          const imgPadded = img.pad([
+            [0, maxSize - h],
+            [0, maxSize - w],
+            [0, 0],
+          ]);
+          widthRatio = (maxSize / w) * 1.85;
+          heightRatio = maxSize / h;
+
+          return tf.image.resizeBilinear(imgPadded, [modelWidth, modelHeight]).div(255.0).expandDims(0);
+        });
+        return [input, widthRatio, heightRatio];
+      }
+
+      async function detect() {
+        if (!model) {
+          return;
+        }
+        tf.engine().startScope();
+        const [modelWidth, modelHeight] = model.inputShape.slice(1, 3);
+        const [input, widthRatio, heightRatio] = preProcessImage(video, modelWidth, modelHeight);
+        const predictions = model.network.execute(input);
+        const transpose = predictions.transpose([0, 2, 1]);
+        const boxes = tf.tidy(() => {
+          const w = transpose.slice([0, 0, 2], [-1, -1, 1]);
+          const h = transpose.slice([0, 0, 3], [-1, -1, 1]);
+          const x1 = tf.sub(transpose.slice([0, 0, 0], [-1, -1, 1]), tf.div(w, 2));
+          const y1 = tf.sub(transpose.slice([0, 0, 1], [-1, -1, 1]), tf.div(h, 2));
+          return tf.concat([y1, x1, tf.add(y1, h), tf.add(x1, w)], 2).squeeze();
+        });
+
+        const scores = tf.tidy(() => {
+          const rawScores = transpose.slice([0, 0, 4], [-1, -1, 1]).squeeze();
+          return rawScores;
+        });
+        const landmarks = tf.tidy(() => {
+          return transpose.slice([0, 0, 5], [-1, -1, -1]).squeeze();
+        });
+        const nms = await tf.image.nonMaxSuppressionAsync(boxes, scores, 500, 0.45, 0.3);
+        const boxes_data = boxes.gather(nms, 0).dataSync();
+        const scores_data = scores.gather(nms, 0).dataSync();
+        let landmarks_data = landmarks.gather(nms, 0).dataSync();
+        landmarks_data = tf.reshape(landmarks_data, [-1, 3, 17]);
+        findArms(landmarks_data, boxes_data, scores_data, widthRatio, heightRatio);
+        sendColors();
+        // tf.dispose([predictions, transpose, boxes, scores, nms]);
+        tf.engine().endScope();
+      }
+
+      const bodyParts = [
+        'nose',
+        'leftEye',
+        'rightEye',
+        'leftEar',
+        'rightEar',
+        'leftShoulder',
+        'rightShoulder',
+        'leftElbow',
+        'rightElbow',
+        'leftWrist',
+        'rightWrist',
+        'leftHip',
+        'rightHip',
+        'leftKnee',
+        'rightKnee',
+        'leftAnkle',
+        'rightAnkle',
+      ];
+
+      let arms = [];
+      function findArms(landmarks_data, boxes_data, scores_data, widthRatio, heightRatio) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        arms = [];
+        for (let i = 0; i < scores_data.length; ++i) {
+          const keypoints = landmarks_data.slice([i, 0, 0], [1, -1, -1]).reshape([17, 3]).arraySync();
+          const p = {};
+          for (let j = 0; j < keypoints.length; j++) {
+            const x = keypoints[j][0] * widthRatio;
+            const y = keypoints[j][1] * heightRatio;
+            const bodyPart = bodyParts[j];
+            p[bodyPart] = { x, y };
+          }
+          ctx.strokeStyle = 'green';
+          if (p.leftElbow.y > p.leftWrist.y) {
+            ctx.strokeStyle = 'red';
+            arms.push({ elbow: p.leftElbow, wrist: p.leftWrist, person: i, side: 'left' });
+          }
+          ctx.beginPath();
+          ctx.moveTo(p.leftElbow.x, p.leftElbow.y);
+          ctx.lineTo(p.leftWrist.x, p.leftWrist.y);
+          ctx.stroke();
+          ctx.closePath();
+          ctx.strokeStyle = 'blue';
+          if (p.rightElbow.y > p.rightWrist.y) {
+            ctx.strokeStyle = 'yellow';
+            arms.push({ elbow: p.rightElbow, wrist: p.rightWrist, person: i, side: 'right' });
+          }
+          ctx.beginPath();
+          ctx.moveTo(p.rightElbow.x, p.rightElbow.y);
+          ctx.lineTo(p.rightWrist.x, p.rightWrist.y);
+          ctx.stroke();
+          ctx.closePath();
+        }
+        for (const arm of arms) {
+          arm.angle = getLEDAngle(arm.elbow, arm.wrist);
+        }
+      }
+      function getLEDAngle(p1, p2) {
+        const R = 300;
+        const x1 = p1.x - 160;
+        const x2 = p2.x - 160;
+        const y1 = 120 - p1.y;
+        const y2 = 120 - p2.y;
+        const m = (x2 - x1) / (y2 - y1);
+        const C = x1 - m * y1;
+        const a = 1 + m * m;
+        const b = 2 * m * C;
+        const c = C * C - R * R;
+        const sq = Math.sqrt(b * b - 4 * a * c);
+        const y = (sq - b) / (2 * a);
+        const x = m * y + C;
+        const angle = (Math.atan2(y, x) / Math.PI) * LEDS;
+        return angle;
+      }
+      function sendColors() {
+        const colors = [];
+        for (let i = 0; i < LEDS; ++i) {
+          let r = 0;
+          let g = 0;
+          let b = 1;
+          for (const arm of arms) {
+            const d = i - arm.angle;
+            if (arm.side === 'left' && arm.person === 0) {
+              r += 100 * Math.exp(-0.02 * d * d);
+            }
+            if (arm.side === 'right' && arm.person === 0) {
+              g += 100 * Math.exp(-0.02 * d * d);
+            }
+          }
+          colors.push([Math.floor(r), Math.floor(g), Math.floor(b)]);
+        }
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify(colors));
+        }
+      }
+    </script>
+  </body>
+</html>
+
