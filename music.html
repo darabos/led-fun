@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <html>
+  <head>
+    <style>
+      a {
+        font-weight: 100;
+        text-decoration: none;
+        color: gray;
+      }
+    </style>
+  </head>
   <body>
+    <h2>Music | <a href="pose.html">Pose</a></h2>
     <script>
       const ws = new WebSocket(`ws://192.168.0.172:8000/ws`);
       let analyser;
