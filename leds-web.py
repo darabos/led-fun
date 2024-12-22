@@ -50,7 +50,7 @@ async def get():
 
 
 MODES = [
-    "test",
+    # "test",
     "xmas static",
     "xmas switching",
     "xmas left",
