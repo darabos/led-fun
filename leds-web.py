@@ -60,6 +60,7 @@ MODES = [
     "xmas momentum",
     "xmas blend",
     "xmas fountain",
+    "flame tennis",
     "inigo",
     "starry night",
     "she ra",
@@ -134,6 +135,21 @@ def get_color(t, m, i):
         r = sin(t / (2000 + j * 10) + j * 20) ** 10000 * 255
         g = r
         b = max(1, r)
+    elif m == "flame tennis":
+        LIFT = 100
+        if LIFT < i < LED_COUNT - LIFT:
+            i -= LIFT
+            COUNT = LED_COUNT - 2 * LIFT
+            v = (i - t * 3) % (2 * COUNT) - (2 * COUNT - 100)
+            v *= 3
+            r = max(0, v)
+            g = max(0, v - 100)
+            b = max(0, v - 200)
+            v = (-i - t * 3) % (2 * COUNT) - (2 * COUNT - 100)
+            v *= 3
+            b += max(0, v)
+            g += max(0, v - 100)
+            r += max(0, v - 200)
     elif m == "inigo":
         # https://www.youtube.com/watch?v=TH3OTy5fTog
         p = t / 100
@@ -152,7 +168,7 @@ def get_color(t, m, i):
 async def idle():
     t = 0
     mode = 0
-    MODE_PERIOD = LED_COUNT * 60
+    MODE_PERIOD = LED_COUNT * 10
     while True:
         if time.time() - last_ws_data_timestamp > 2:
             m = MODES[mode]
@@ -168,7 +184,7 @@ async def idle():
                 strip.setPixelColor(i, c)
             strip.show()
             t += 1
-            if t == LED_COUNT * 6:
+            if t == MODE_PERIOD:
                 t = 0
                 mode = (mode + 1) % len(MODES)
         await asyncio.sleep(0.01)
