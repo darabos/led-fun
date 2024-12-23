@@ -17,6 +17,7 @@ import asyncio
 import fastapi
 import fastapi.staticfiles
 import json
+import rainbow
 import time
 
 LED_COUNT = 600
@@ -61,6 +62,7 @@ MODES = [
     "xmas fountain",
     "inigo",
     "starry night",
+    "she ra",
 ]
 
 
@@ -123,6 +125,10 @@ def get_color(t, m, i):
         r = max(0, sin(p)) ** 3 * 600 - 200 + copysign(100, sin(p / 2))
         g = max(0, sin(p)) ** 3 * 600 - 200 + copysign(100, sin(p / 2 + pi))
         b = max(0, sin(p)) ** 3 * 600 - 400
+    elif m == "she ra":
+        p = abs(i - 311) + t * 3
+        c = int(p) % len(rainbow.colors)
+        r, g, b = rainbow.colors[c]
     elif m == "starry night":
         j = PERM[i]
         r = sin(t / (2000 + j * 10) + j * 20) ** 10000 * 255
@@ -146,17 +152,18 @@ def get_color(t, m, i):
 async def idle():
     t = 0
     mode = 0
-    MODE_PERIOD = LED_COUNT * 6
+    MODE_PERIOD = LED_COUNT * 60
     while True:
         if time.time() - last_ws_data_timestamp > 2:
             m = MODES[mode]
             for i in range(LED_COUNT):
                 r, g, b = get_color(t, m, i)
-                if t < 20:
+                FADE = 20
+                if t < FADE:
                     r2, g2, b2 = get_color(t + MODE_PERIOD, MODES[mode - 1], i)
-                    r = r * t / 20 + r2 * (20 - t) / 20
-                    g = g * t / 20 + g2 * (20 - t) / 20
-                    b = b * t / 20 + b2 * (20 - t) / 20
+                    r = r * t / FADE + r2 * (FADE - t) / FADE
+                    g = g * t / FADE + g2 * (FADE - t) / FADE
+                    b = b * t / FADE + b2 * (FADE - t) / FADE
                 c = Color(i2b(r), i2b(g), i2b(b))
                 strip.setPixelColor(i, c)
             strip.show()
