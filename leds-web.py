@@ -64,6 +64,7 @@ MODES = [
     "inigo",
     "starry night",
     "she ra",
+    "flames",
 ]
 
 
@@ -150,6 +151,31 @@ def get_color(t, m, i):
             b += max(0, v)
             g += max(0, v - 100)
             r += max(0, v - 200)
+    elif m == "flames":
+        if 190 <= i <= 433:
+            v = 0
+            for j in range(5):
+                p = int(
+                    sin(t / (21 + v)) * 50
+                    + sin(t / (23 + v)) * 50
+                    + sin(t / (27 + v)) * 50
+                    + sin(t / (177 + v)) * 50
+                    + 311
+                )
+                r += 10 if p == i else 0
+                t += 1000000
+                v += 1
+        else:
+            if i > 433:
+                i = 600 - i
+            f = lambda x: max(0, sin(x))  # noqa: E731
+            v = f(i / 10 - t / 7) + f(i / 8 - t / 3) + f(i / 20 - t / 17)
+            v -= 0.1
+            v += max(0, 100 / (i + 1) - 1)
+            V = 100
+            r = max(0, v * V)
+            g = max(0, v * V - 255)
+            b = max(0, v * V - 510)
     elif m == "inigo":
         # https://www.youtube.com/watch?v=TH3OTy5fTog
         p = t / 100
